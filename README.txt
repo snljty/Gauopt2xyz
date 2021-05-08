@@ -1,1 +1,1 @@
-run in command mode, and add an argument '--help' to see details of usage.
+run in command mode or interactive mode, and add an argument '--help' to see details of usage.
