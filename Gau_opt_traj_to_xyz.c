@@ -7,7 +7,7 @@ void Pause_program(char const *prompt);
 
 int main(int argc, char const *argv[])
 {
-    unsigned int const num_useless_lines = 4u;
+    int const num_useless_lines = 4u;
     bool is_load_inp_ori = false;
     bool is_load_std_ori = false;
     bool is_terminated_normally = false;
@@ -24,12 +24,12 @@ int main(int argc, char const *argv[])
     FILE *if_file = NULL;
     FILE *of_inp_file = NULL;
     FILE *of_std_file = NULL;
-    unsigned int frame = 0;
-    unsigned int num_atoms = 0;
-    unsigned int index = 0;
-    unsigned int cenNum = 0;
-    unsigned int atomic_number = 0;
-    unsigned int atomType = 0;
+    int frame = 0;
+    int num_atoms = 0;
+    int index = 0;
+    int cenNum = 0;
+    int atomic_number = 0;
+    int atomType = 0;
     double coord_x = 0.;
     double coord_y = 0.;
     double coord_z = 0.;
@@ -49,18 +49,24 @@ int main(int argc, char const *argv[])
          "Bk", "Cf", "Es", "Fm", "Md", "No", "Lr", "Rf",
          "Db", "Sg", "Bh", "Hs", "Mt", "Ds", "Rg", "Cn", 
          "Nh", "Fl", "Mc", "Lv", "Ts", "Og"};
-    unsigned int const max_atomic_number = sizeof(elements) / sizeof(char const *) - 1;
+    int const max_atomic_number = sizeof(elements) / sizeof(char const *) - 1;
+    size_t read_pos = 0ll;
+    char ene_type_str[11] = "";
+    double ene = 0.0;
+    char *tok = NULL;
 
-    if (argc == 1)
-        puts("Convert optimization output of Gaussian to xyz trajectory file.");
+    if (argc - 1 == 0)
+    {
+        printf("Convert optimization output of Gaussian to xyz trajectory file.\n");
+    }
 
     /*  Get file name */
-    if (argc > 2)
+    if (argc - 1 >= 2)
     {
         fprintf(stderr, "Error! At most 1 argument is required, but got %d.\n", argc - 1);
         exit(EXIT_FAILURE);
     }
-    else if (argc == 2)
+    else if (argc - 1 == 1)
     {
         if (! strcmp(argv[1], "--help") || ! strcmp(argv[1], "-h") || ! strcmp(argv[1], "/?"))
         {
@@ -75,10 +81,15 @@ int main(int argc, char const *argv[])
     }
     else
     {
-        puts("Input file name, e.g. Desktop\\test.out");
-        fgets(buf, BUFSIZ, stdin);
+        printf("Input file name, e.g. Desktop\\test.out\n");
+        while (! fgets(buf, BUFSIZ, stdin))
+        {
+            ;
+        }
         if (buf[strlen(buf) - 1] == '\n')
+        {
             buf[strlen(buf) - 1] = '\0';
+        }
         if (buf[0] == '\'' || buf[0] == '\"')
         {
             buf[strlen(buf) - 1] = '\0';
@@ -86,13 +97,16 @@ int main(int argc, char const *argv[])
             strcpy(if_name, buf + 1);
         }
         else
+        {
             strcpy(if_name, buf);
+        }
     }
 
     /*  Check filename extension  */
     /*  Please note this short-circuit evalutation trick and think twice.  */
-    if (strlen(if_name) <= strlen(".xyz") || strcmp(if_name + strlen(if_name) - strlen(".out"), ".out") && \
-        strcmp(if_name + strlen(if_name) - strlen(".log"), ".log"))
+    // if (strlen(if_name) <= strlen(".xyz") || strcmp(if_name + strlen(if_name) - strlen(".out"), ".out") && \
+    //     strcmp(if_name + strlen(if_name) - strlen(".log"), ".log"))
+    if (! strrchr(if_name, '.') || strcmp(strrchr(if_name, '.'), ".out") && strcmp(strrchr(if_name, '.'), ".log"))
     {
         fprintf(stderr, "Error! The suffix of the input name should be either \".out\" or \".log\".\n");
         exit(EXIT_FAILURE);
@@ -103,7 +117,7 @@ int main(int argc, char const *argv[])
     strcpy(of_std_name + strlen(if_name) - strlen(".out"), "_std_ori.xyz");
 
     /*  Open files  */
-    if_file = fopen(if_name, "r");
+    if_file = fopen(if_name, "rt");
     if (! if_file)
     {
         fprintf(stderr, "Error! Cannot open%s! Check your path and file name.\n", if_name);
@@ -117,7 +131,7 @@ int main(int argc, char const *argv[])
     {
         if (chr_pos = strstr(buf, num_atoms_locator))
         {
-            sscanf(chr_pos + strlen(num_atoms_locator), "%u", & num_atoms);
+            sscanf(chr_pos + strlen(num_atoms_locator), "%d", & num_atoms);
             break;
         }
     }
@@ -126,9 +140,64 @@ int main(int argc, char const *argv[])
         fprintf(stderr, "Error! Cannot get amount of atoms through \"%s\".\n", num_atoms_locator);
         exit(EXIT_FAILURE);
     }
-    rewind(if_file);
     if (argc == 1)
-        printf("The number of atoms: %u\n", num_atoms);
+    {
+        printf("The number of atoms: %d\n", num_atoms);
+    }
+    rewind(if_file);
+
+    /* obtain energy type */
+    while (true)
+    {
+        if (! fgets(buf, BUFSIZ, if_file))
+        {
+            fprintf(stderr, "Error! Cannot determine energy type.\n");
+            fclose(if_file);
+            if_file = NULL;
+            exit(EXIT_FAILURE);
+        }
+        if (strstr(buf, "Energy="))
+        {
+            strcpy(ene_type_str, "MM");
+            break;
+        }
+        if (strstr(buf, "SCF Done"))
+        {
+            break;
+        }
+    }
+    if (strcmp(ene_type_str, "MM")) /* found "SCF Done" */
+    {
+        while (true)
+        {
+            if (! fgets(buf, BUFSIZ, if_file) || strstr(buf, "Population analysis"))
+            {
+                strcpy(ene_type_str, "SCF");
+                break;
+            }
+            if (strstr(buf, "EUMP2 ="))
+            {
+                strcpy(ene_type_str, "MP2");
+                break;
+            }
+            if (! strncmp(buf, " E2(", strlen(" E2(")))
+            {
+                strcpy(ene_type_str, "DFTPT2");
+                break;
+            }
+            if (strstr(buf, "E(CIS/TDA)"))
+            {
+                strcpy(ene_type_str, "CIS/TDA");
+                break;
+            }
+            if (strstr(buf, "E(TD-HF/TD-DFT)"))
+            {
+                strcpy(ene_type_str, "TD");
+                break;
+            }
+        }
+    }
+    rewind(if_file);
 
     /*  Check whether input orientation or standard orientation exists  */
     while (fgets(buf, BUFSIZ, if_file))
@@ -158,13 +227,13 @@ int main(int argc, char const *argv[])
     /*  Open files for output  */
     if (is_load_inp_ori)
     {
-        of_inp_file = fopen(of_inp_name, "r");
+        of_inp_file = fopen(of_inp_name, "rt");
         if (of_inp_file)
         {
             fprintf(stderr, "Error! File \"%s\" already exists, please remove or rename it first.\n", of_inp_name);
             exit(EXIT_FAILURE);
         }
-        of_inp_file = fopen(of_inp_name, "w");
+        of_inp_file = fopen(of_inp_name, "wt");
         if (! of_inp_file)
         {
             fprintf(stderr, "Error! Cannot open \"%s\" for writing! Check your path and file name.\n", of_inp_name);
@@ -174,13 +243,13 @@ int main(int argc, char const *argv[])
     }
     if (is_load_std_ori)
     {
-        of_std_file = fopen(of_std_name, "r");
+        of_std_file = fopen(of_std_name, "rt");
         if (of_std_file)
         {
             fprintf(stderr, "Error! File \"%s\" already exists, please remove or rename it first.\n", of_std_name);
             exit(EXIT_FAILURE);
         }
-        of_std_file = fopen(of_std_name, "w");
+        of_std_file = fopen(of_std_name, "wt");
         if (! of_std_file)
         {
             fprintf(stderr, "Error! Cannot open \"%s\" for writing! Check your path and file name.\n", of_std_name);
@@ -196,24 +265,115 @@ int main(int argc, char const *argv[])
         while (fgets(buf, BUFSIZ, if_file))
         {
             if (strstr(buf, station_point_found))
+            {
                 break;
+            }
             if (strstr(buf, coord_locator_inp))
             {
                 ++ frame;
+                read_pos = ftell(if_file);
+                /* for energy */
+                if (strstr(ene_type_str, "MM"))
+                {
+                    while (fgets(buf, BUFSIZ, if_file))
+                    {
+                        if (tok = strstr(buf, "Energy="))
+                        {
+                            break;
+                        }
+                    }
+                    tok += strlen("Energy=");
+                    sscanf(tok, "%lg", & ene);
+                }
+                else if (strstr(ene_type_str, "SCF"))
+                {
+                    while (fgets(buf, BUFSIZ, if_file))
+                    {
+                        if (strstr(buf, "SCF Done"))
+                        {
+                            break;
+                        }
+                    }
+                    tok = strchr(buf, '=') + strlen("=");
+                    sscanf(tok, "%lg", & ene);
+                }
+                else if (strstr(ene_type_str, "MP2"))
+                {
+                    while (fgets(buf, BUFSIZ, if_file))
+                    {
+                        if (tok = strstr(buf, "EUMP2"))
+                        {
+                            break;
+                        }
+                    }
+                    tok = strchr(tok, ' ') + strlen("=");
+                    * strchr(tok, 'D') = 'E';
+                    sscanf(tok, "%lg", & ene);
+                }
+                else if (strstr(ene_type_str, "DFTPT2"))
+                {
+                    while (fgets(buf, BUFSIZ, if_file))
+                    {
+                        if (! strncmp(buf, " E2(", strlen(" E2(")))
+                        {
+                            break;
+                        }
+                    }
+                    tok = strstr(buf, "E(");
+                    tok = strchr(tok, '=') + strlen("=");
+                    * strchr(tok, 'D') = 'E';
+                    sscanf(tok, "%lg", & ene);
+                }
+                else if (strstr(ene_type_str, "CIS/TDA"))
+                {
+                    while (fgets(buf, BUFSIZ, if_file))
+                    {
+                        if (tok = strstr(buf, "E(CIS/TDA)"))
+                        {
+                            break;
+                        }
+                    }
+                    tok = strchr(buf, '=') + strlen("=");
+                    sscanf(tok, "%lg", & ene);
+                }
+                else if (strstr(ene_type_str, "TD"))
+                {
+                    while (fgets(buf, BUFSIZ, if_file))
+                    {
+                        if (tok = strstr(buf, "E(TD-HF/TD-DFT)"))
+                        {
+                            break;
+                        }
+                    }
+                    tok = strchr(buf, '=') + strlen("=");
+                    sscanf(tok, "%lg", & ene);
+                }
+                else
+                {
+                    /* should never happen */
+                    ;
+                }
+                tok = NULL;
+                fseek(if_file, read_pos, SEEK_SET);
+                /* for coordinates */
                 for (index = 0; index < num_useless_lines; ++ index)
+                {
                     fgets(buf, BUFSIZ, if_file);
-                fprintf(of_inp_file, "%u\n", num_atoms);
-                fprintf(of_inp_file, "Frame %u\n", frame);
+                }
+                fprintf(of_inp_file, "%d\n", num_atoms);
+                fprintf(of_inp_file, "frame %d: energy = %17.10lf Hartree (energy type: \"%s\")\n", frame, ene, ene_type_str);
                 for (index = 1; index <= num_atoms; ++ index)
                 {
                     fgets(buf, BUFSIZ, if_file);
-                    if (sscanf(buf, "%*u %u %*u %lf %lf %lf", & atomic_number, & coord_x, & coord_y, & coord_z) != 4)
+                    if (sscanf(buf, "%*d %d %*d %lg %lg %lg", & atomic_number, & coord_x, & coord_y, & coord_z) != 4)
                     {
                         fprintf(stderr, "Error! Cannot get information of the atom with index %d in frame %d.\n", index, frame);
                         exit(EXIT_FAILURE);
                     }
                     if (atomic_number <= max_atomic_number)
+                    {
                         fprintf(of_inp_file, "%-2s%8s%12.8f%8s%12.8f%8s%12.8f\n", elements[atomic_number], "", coord_x, "", coord_y, "", coord_z);
+                    }
                     else
                     {
                         fprintf(stderr, "Warning! Atomic number larger overflowed in current periodic table, using \"Bq\" as atomic symbol.\n");
@@ -232,24 +392,115 @@ int main(int argc, char const *argv[])
         while (fgets(buf, BUFSIZ, if_file))
         {
             if (strstr(buf, station_point_found))
+            {
                 break;
+            }
             if (strstr(buf, coord_locator_std))
             {
                 ++ frame;
+                read_pos = ftell(if_file);
+                /* for energy */
+                if (strstr(ene_type_str, "MM"))
+                {
+                    while (fgets(buf, BUFSIZ, if_file))
+                    {
+                        if (tok = strstr(buf, "Energy="))
+                        {
+                            break;
+                        }
+                    }
+                    tok += strlen("Energy=");
+                    sscanf(tok, "%lg", & ene);
+                }
+                else if (strstr(ene_type_str, "SCF"))
+                {
+                    while (fgets(buf, BUFSIZ, if_file))
+                    {
+                        if (strstr(buf, "SCF Done"))
+                        {
+                            break;
+                        }
+                    }
+                    tok = strchr(buf, '=') + strlen("=");
+                    sscanf(tok, "%lg", & ene);
+                }
+                else if (strstr(ene_type_str, "MP2"))
+                {
+                    while (fgets(buf, BUFSIZ, if_file))
+                    {
+                        if (tok = strstr(buf, "EUMP2"))
+                        {
+                            break;
+                        }
+                    }
+                    tok = strchr(tok, ' ') + strlen("=");
+                    * strchr(tok, 'D') = 'E';
+                    sscanf(tok, "%lg", & ene);
+                }
+                else if (strstr(ene_type_str, "DFTPT2"))
+                {
+                    while (fgets(buf, BUFSIZ, if_file))
+                    {
+                        if (! strncmp(buf, " E2(", strlen(" E2(")))
+                        {
+                            break;
+                        }
+                    }
+                    tok = strstr(buf, "E(");
+                    tok = strchr(tok, '=') + strlen("=");
+                    * strchr(tok, 'D') = 'E';
+                    sscanf(tok, "%lg", & ene);
+                }
+                else if (strstr(ene_type_str, "CIS/TDA"))
+                {
+                    while (fgets(buf, BUFSIZ, if_file))
+                    {
+                        if (tok = strstr(buf, "E(CIS/TDA)"))
+                        {
+                            break;
+                        }
+                    }
+                    tok = strchr(buf, '=') + strlen("=");
+                    sscanf(tok, "%lg", & ene);
+                }
+                else if (strstr(ene_type_str, "TD"))
+                {
+                    while (fgets(buf, BUFSIZ, if_file))
+                    {
+                        if (tok = strstr(buf, "E(TD-HF/TD-DFT)"))
+                        {
+                            break;
+                        }
+                    }
+                    tok = strchr(buf, '=') + strlen("=");
+                    sscanf(tok, "%lg", & ene);
+                }
+                else
+                {
+                    /* should never happen */
+                    ;
+                }
+                tok = NULL;
+                fseek(if_file, read_pos, SEEK_SET);
+                /* for coordinates */
                 for (index = 0; index < num_useless_lines; ++ index)
+                {
                     fgets(buf, BUFSIZ, if_file);
-                fprintf(of_std_file, "%u\n", num_atoms);
-                fprintf(of_std_file, "Frame %u\n", frame);
+                }
+                fprintf(of_std_file, "%d\n", num_atoms);
+                fprintf(of_std_file, "frame %d: energy = %17.10lf Hartree (energy type: \"%s\")\n", frame, ene, ene_type_str);
                 for (index = 1; index <= num_atoms; ++ index)
                 {
                     fgets(buf, BUFSIZ, if_file);
-                    if (sscanf(buf, "%*u %u %*u %lf %lf %lf", & atomic_number, & coord_x, & coord_y, & coord_z) != 4)
+                    if (sscanf(buf, "%*d %d %*d %lg %lg %lg", & atomic_number, & coord_x, & coord_y, & coord_z) != 4)
                     {
                         fprintf(stderr, "Error! Cannot get information of the atom with index %d in frame %d.\n", index, frame);
                         exit(EXIT_FAILURE);
                     }
                     if (atomic_number <= max_atomic_number)
+                    {
                         fprintf(of_std_file, "%-2s%8s%12.8f%8s%12.8f%8s%12.8f\n", elements[atomic_number], "", coord_x, "", coord_y, "", coord_z);
+                    }
                     else
                     {
                         fprintf(stderr, "Warning! Atomic number larger overflowed in current periodic table, using \"Bq\" as atomic symbol.\n");
@@ -274,9 +525,13 @@ int main(int argc, char const *argv[])
     }
 
     if (argc == 1 && is_load_inp_ori)
+    {
         printf("The trajectory as input orientation has been saved to %s\n", of_inp_name);
+    }
     if (argc == 1 && is_load_std_ori)
+    {
         printf("The trajectory as standard orientation has been saved to %s\n", of_std_name);
+    }
     while (fgets(buf, BUFSIZ, if_file))
     {
         if (strstr(buf, normal_termination))
@@ -286,15 +541,21 @@ int main(int argc, char const *argv[])
         }
     }
     if (! is_terminated_normally)
+    {
         fprintf(stderr, "Warning: Gaussian job may still be running or did not terminate normally.\n");
+    }
     fclose(if_file);
     if_file = NULL;
     if (argc == 1)
-        puts("Done!");
+    {
+        printf("Done!\n");
+    }
 
     /*  Pause  */
     if (argc == 1)
+    {
         Pause_program("Press <Enter> to continue...");
+    }
 
     return 0;
 }
@@ -304,9 +565,13 @@ void Pause_program(char const *prompt)
     char pauser = '\0';
 
     if (prompt)
-        puts(prompt);
+    {
+        printf("%s\n", prompt);
+    }
     while ((pauser = getchar()) != '\n' && pauser != EOF)
+    {
         ;
+    }
 
     return;
 }
